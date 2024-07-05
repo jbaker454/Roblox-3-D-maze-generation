@@ -1,41 +1,39 @@
 local Maze = {}
 
+local ServerStorage = game:GetService("ServerStorage")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Chunk = require(ServerStorage:WaitForChild("ChunkGenerator"))
+
+local ProgressBarSetter = require(ReplicatedStorage:WaitForChild("ProgressBarSetter"))
+
 local unitVectors = {Vector3.new(1, 0, 0),Vector3.new(0, 1, 0),Vector3.new(0, 0, 1),
 	Vector3.new(-1, 0, 0),Vector3.new(0, -1, 0),Vector3.new(0, 0, -1)}
 
-local function compareVector3(vector3A,vector3B)
-	--returns true if the two vector3s are the same
+local function compareVector3(vector3A:Vector3,vector3B:Vector3):boolean
 	if vector3A.X == vector3B.X and vector3A.Y == vector3B.Y and vector3A.Z == vector3B.Z then
 		return true
 	end
 	return false
 end
 
-local function checkFor0Vector3(vector3A)
+local function checkFor0Vector3(vector3A:Vector3):boolean
 	return compareVector3(vector3A,Vector3.new(0,0,0))
 end
 
-local function findMazePosition (array,item)
-	--returns the array with the item removed
-	--returns false if the item is not found in the array
-	for index,value in pairs(array) do
-		if compareVector3(value[1],item) then
-			return index
-		end
+local function getMagnitudeWithNegatives(vector3A:Vector3):number
+	if vector3A.X < 0 or vector3A.Y < 0 or vector3A.Z < 0 then
+		return (vector3A.Magnitude * -1)
 	end
-	return nil
+	return vector3A.Magnitude
 end
 
-local function getMagnitudeWithNegatives(vector3)
-	--returns the magnitude of a vector3 with negatives factored in
-	if vector3.X < 0 or vector3.Y < 0 or vector3.Z < 0 then
-		return (vector3.Magnitude * -1)
-	end
-	return vector3.Magnitude
-end
-
-local function determineMaxPathSizeByMazeSize(vector3Direction,mazeHeadPosition,mazeSize,maxTunnelLength)
-	--returns the max path length by the maze position, maze size, max tunnel length, and direction
+local function determineMaxPathSizeByMazeSize(
+	 vector3Direction:Vector3,
+	 mazeHeadPosition:Vector3,
+	 mazeSize:Vector3,
+	 maxTunnelLength:IntValue
+):IntValue
 	local vector3DirectionAbs = Vector3.new().Abs(vector3Direction)
 	local vector3DirectionMagnitude = getMagnitudeWithNegatives(vector3Direction)
 	
@@ -46,47 +44,43 @@ local function determineMaxPathSizeByMazeSize(vector3Direction,mazeHeadPosition,
 	local mazeSizeVectorMagnitude = mazeSizeVector.Magnitude
 	
 	if vector3DirectionMagnitude == 1 then
-		return math.min(mazeSizeVectorMagnitude - mazeHeadPositionVectorMagnitude - 1,maxTunnelLength)
+		return math.min(mazeSizeVectorMagnitude - (mazeHeadPositionVectorMagnitude + 1),maxTunnelLength)
 	elseif vector3DirectionMagnitude == -1 then
-		return math.max(1 - mazeHeadPositionVectorMagnitude - 1,-maxTunnelLength)
+		return math.max(-mazeHeadPositionVectorMagnitude,-maxTunnelLength)
 	else
 		return 0
 	end
 end
 
-local function determineMaxPathSizeByTakenPositions(mazeHeadPosition,vector3DirectionAbs,maxPossiblePathDistance,takenPositions)
-	--returns the max path length by the maze position and direction
-	--returns 0 if there is no path
-	local mazeHeadPositionVector = mazeHeadPosition * vector3DirectionAbs
-	local mazeHeadPositionVectorMagnitude = mazeHeadPositionVector.Magnitude
-	
-	for _,takenPosition in pairs(takenPositions) do
-		local takenPositionOtherVectors = takenPosition[1] * Vector3.new().Abs(vector3DirectionAbs + Vector3.new(-1,-1,-1))
-		local mazeHeadPositionOtherVectors = mazeHeadPosition * Vector3.new().Abs(vector3DirectionAbs + Vector3.new(-1,-1,-1))
-		
-		if not compareVector3(mazeHeadPosition,takenPosition[1]) and 
-			compareVector3(takenPositionOtherVectors,mazeHeadPositionOtherVectors) then
-			local takenPositionVector = takenPosition[1] * vector3DirectionAbs
-			local takenPositionVectorMagnitude = getMagnitudeWithNegatives(takenPositionVector)
-			
-			if maxPossiblePathDistance > 0 then
-				local possiblePathDistance = takenPositionVectorMagnitude - mazeHeadPositionVectorMagnitude - 1 
-				if 0 <= possiblePathDistance and possiblePathDistance < maxPossiblePathDistance then
-					maxPossiblePathDistance = possiblePathDistance
-				end
-			elseif maxPossiblePathDistance < 0 then 
-				local possiblePathDistance = takenPositionVectorMagnitude - mazeHeadPositionVectorMagnitude + 1
-				if maxPossiblePathDistance < possiblePathDistance and possiblePathDistance <= 0 then
-					maxPossiblePathDistance = possiblePathDistance
-				end
-			end
-		end
+local function determineMaxPathSizeByTakenPositions(
+	mazeHeadPosition:Vector3,
+	vector3DirectionAbs:Vector3,
+	maxPossiblePathDistance:IntValue,
+	takenPositions:any
+):IntValue
+	local direction = 1
+	local vector3Direction = vector3DirectionAbs
+	if maxPossiblePathDistance < 0 then
+		direction = -1
+		vector3Direction = vector3DirectionAbs * -1
 	end
+	
+	local testPosition = mazeHeadPosition
+	local testDistance = direction
+	while math.abs(testDistance) <= math.abs(maxPossiblePathDistance) do
+		testPosition += vector3Direction
+		local x,y,z,i = Chunk.findTargetPosition(testPosition,takenPositions)
+		if not (i == nil) then
+			maxPossiblePathDistance = testDistance - direction
+			break
+		end
+		testDistance += direction
+	end
+	
 	return maxPossiblePathDistance
 end
 
-local function randomizePathLength(maxPossiblePathDistance,vector3DirectionAbs)
-	--returns a random vector3 of the path length and direction from the max possible path distance
+local function randomizePathLength(maxPossiblePathDistance:IntValue,vector3DirectionAbs:Vector3):Vector3
 	local possiblePathMagnitude = maxPossiblePathDistance
 	if maxPossiblePathDistance > 0 then
 		possiblePathMagnitude = math.random(1,maxPossiblePathDistance)
@@ -96,8 +90,13 @@ local function randomizePathLength(maxPossiblePathDistance,vector3DirectionAbs)
 	return (vector3DirectionAbs * possiblePathMagnitude)
 end
 
-local function findPossibleVector3Path(mazeHeadPosition,takenPositions,vector3Direction,mazeSize,maxTunnelLength)
-	--returns a vector3 of the path length and direction or false if there is no possible path
+local function findPossibleVector3Path(
+	mazeHeadPosition:Vector3,
+	takenPositions:any,
+	vector3Direction:Vector3,
+	mazeSize:Vector3,
+	maxTunnelLength:IntValue
+):Vector3
 	local vector3DirectionAbs = Vector3.new().Abs(vector3Direction)
 	
 	local maxPossiblePathDistance = determineMaxPathSizeByMazeSize(vector3Direction,mazeHeadPosition,mazeSize,maxTunnelLength)
@@ -113,8 +112,12 @@ local function findPossibleVector3Path(mazeHeadPosition,takenPositions,vector3Di
 	end
 end
 
-local function findPossibleVector3Paths(mazeHeadPosition,takenPositions,mazeSize,maxTunnelLength)
-	--returns an array of six possible paths from the given position
+local function findPossibleVector3Paths(
+	mazeHeadPosition:Vector3,
+	takenPositions:any,
+	mazeSize:Vector3,
+	maxTunnelLength:IntValue
+):{Vector3}
 	local possiblePaths = {}
 	for _,unitVector in pairs(unitVectors) do
 		local possiblePath = findPossibleVector3Path(mazeHeadPosition,takenPositions,unitVector,mazeSize,maxTunnelLength)
@@ -123,8 +126,7 @@ local function findPossibleVector3Paths(mazeHeadPosition,takenPositions,mazeSize
 	return possiblePaths
 end
 
-local function determinePaths(possiblePaths)
-	--returns an array of all paths that are determined randomly from the given paths
+local function determinePaths(possiblePaths:{Vector3}):{Vector3}
 	local pathsPossibleNumber = 0
 	for _,possiblePath in pairs(possiblePaths) do
 		if not checkFor0Vector3(possiblePath) then
@@ -155,8 +157,7 @@ local function determinePaths(possiblePaths)
 	return determinedPaths
 end
 
-local function createPath(possiblePath,mazeHeadPosition)
-	--returns an array of all positions that will be used to create the path
+local function createPath(possiblePath:Vector3,mazeHeadPosition:Vector3):any
 	local newPathPositions = {{mazeHeadPosition + possiblePath,possiblePath.Unit}}
 	local pathLength = possiblePath.magnitude
 	for i = 1, pathLength - 1 do
@@ -166,8 +167,7 @@ local function createPath(possiblePath,mazeHeadPosition)
 	return newPathPositions
 end
 
-local function createWallPositions(mazePosition, unitVector, tunnelSize)
-	--returns an array of all positions that will be used to create the walls of the maze
+local function createWallPositions(mazePosition:Vector3,unitVector:Vector3,tunnelSize:IntValue):{Vector3}
 	local wallPositions = {}
 	local otherUnitVector = Vector3.new().Abs(Vector3.new().Abs(unitVector) + Vector3.new(-1,-1,-1))
 	for i = 1, tunnelSize do
@@ -197,8 +197,7 @@ local function createWallPositions(mazePosition, unitVector, tunnelSize)
 	return wallPositions
 end
 
-local function createBlockPositionsAlongPath(possiblePath,mazeHeadPosition,tunnelSize)
-	--returns an array of all block positions that will be used to create the path
+local function createBlockPositionsAlongPath(possiblePath:Vector3,mazeHeadPosition:Vector3,tunnelSize:IntValue):{Vector3}
 	local newBlockPositions = {}
 	local vector3Direction = possiblePath.Unit
 	for i = 1, possiblePath.Magnitude - 1 do
@@ -215,10 +214,9 @@ local function createBlockPositionsAlongPath(possiblePath,mazeHeadPosition,tunne
 	return newBlockPositions
 end
 
-local function findNumbersNotInArray(array,expectedLength)
-	--returns an array of all numbers that are not in the original array
+local function findNumbersNotInArray(array:{IntValue},startIntiger:IntValue,endIntiger:IntValue):{IntValue}
 	local invertedArray = {}
-	for i = 1,expectedLength do
+	for i = startIntiger,endIntiger do
 		local numberNotFound = true
 		for _,number in pairs(array) do
 			if i == number then
@@ -232,24 +230,31 @@ local function findNumbersNotInArray(array,expectedLength)
 	return invertedArray
 end
 
-local function createBlockPositionsAtMazeHeadPosition(pathsTaken,mazeHeadPosition,tunnelSize,takenPositions,mazeLoopChance)
-	--returns an array of all block positions that will be used to create the walls at the maze head
+local function createBlockPositionsAtMazeHeadPosition(
+	pathsTaken:{IntValue},
+	mazeHeadPosition:Vector3,
+	tunnelSize:IntValue,
+	takenPositions:any,
+	mazeLoopChance:IntValue
+):{IntValue}
 	local newBlockPositions = {}
-	local pathsNotTaken = findNumbersNotInArray(pathsTaken,6)
-	
+	local pathsNotTaken = findNumbersNotInArray(pathsTaken,1,6)
 	for _,pathNotTaken in pairs(pathsNotTaken) do
 		local placeWall = true
+
+		local unitVector = unitVectors[pathNotTaken]
+		local adjacentPosition = mazeHeadPosition + unitVector
 		
-		for _,takenPosition in pairs(takenPositions) do
-			local unitVector = unitVectors[pathNotTaken]
-			local adjacentPosition = mazeHeadPosition + unitVector
-			if compareVector3(adjacentPosition,takenPosition[1]) then
-				placeWall = false
-				if not checkFor0Vector3(takenPosition[2]) and not (math.random(1,100 - mazeLoopChance) <= 1) then
+		if Chunk.checkIfInsideMaze(adjacentPosition,takenPositions) then
+			local x,y,z,i = Chunk.findTargetPosition(adjacentPosition,takenPositions)
+			if not (i == nil) then
+				local adjacentPosition = takenPositions[x][y][z][i]
+				if not checkFor0Vector3(adjacentPosition[2]) and not (math.random(1,100) <= mazeLoopChance) then
 					placeWall = true
+				else
+					placeWall = false
 				end
-			end 
-			
+			end
 		end
 		
 		if placeWall then
@@ -262,19 +267,29 @@ local function createBlockPositionsAtMazeHeadPosition(pathsTaken,mazeHeadPositio
 	return newBlockPositions
 end
 
-local function findNewMazeHeadPosition(takenPositions)
-	--locates the next possible maze position to continue the maze
-	--returns the position as a vector3
-	for _,position in pairs(takenPositions) do
-		if not checkFor0Vector3(position[2]) then
-			return position[1]
+local function findNewMazeHeadPosition(takenPositions:any):Vector3?
+	local validPositions = {}
+	for _,yzPlane in pairs(takenPositions) do
+		for _,zAxis in pairs(yzPlane) do
+			for _,chunk in pairs(zAxis) do
+				for _,position in pairs(chunk) do
+					if not checkFor0Vector3(position[2]) then
+						table.insert(validPositions,position[1]) 
+					end
+				end
+			end
 		end
 	end
-	return nil
+	if #validPositions == 0 then
+		return nil
+	else
+		return validPositions[math.random(1,#validPositions)]
+	end
 end
+		
 
-local function generateCornerPositions(mazeSize, tunnelSize)
-	--returns an array of all the corner positions of the maze
+
+local function generateCornerPositions(mazeSize:Vector3, tunnelSize:IntValue):{Vector3}
 	local cornerPositions = {}
 	for x = 0, mazeSize.X do
 		for y = 0, mazeSize.Y do
@@ -287,10 +302,10 @@ local function generateCornerPositions(mazeSize, tunnelSize)
 	return cornerPositions
 end
 
-local function generateVerticePositions(mazeSize, tunnelSize)
-	--returns an array of all the vertice positions of the maze
+local function generateVerticePositions(mazeSize:Vector3, tunnelSize:IntValue):{Vector3}
 	local verticePositions = {}
 	for x = 0, mazeSize.X do
+		wait(0.001)
 		for y = 0, mazeSize.Y do
 			for z = 0, mazeSize.Z do
 				for i = 1, tunnelSize do
@@ -313,32 +328,49 @@ local function generateVerticePositions(mazeSize, tunnelSize)
 	return verticePositions
 end
 
-local function createBlockGridPositions(mazeSize, tunnelSize)
-	--returns an array of all block positions in a grid as vector3
-	--includes all corner and vertice positions of the maze
-	--does not include the positions of the walls
+local function createBlockGridPositions(mazeSize:Vector3, tunnelSize:IntValue, ProgressBarSetter:ModuleScript):{Vector3}
+	local loadingMessage = "Generating grid..."
+	local incrementAmount = 1 / 2
+	ProgressBarSetter.SetProgressBar(loadingMessage,incrementAmount)
+	
 	local blockPositions = {}
 	
 	local cornerPositions = generateCornerPositions(mazeSize, tunnelSize)
 	for _,cornerPosition in cornerPositions do
 		table.insert(blockPositions,cornerPosition)
 	end
+	ProgressBarSetter.IncrementProgressBar()
 	
 	local verticePositions = generateVerticePositions(mazeSize, tunnelSize)
 	for _,verticePosition in verticePositions do
 		table.insert(blockPositions,verticePosition)
 	end
+	ProgressBarSetter.IncrementProgressBar()
 	
 	return blockPositions
 end
 
-function Maze.generateMaze(mazeSize,tunnelSize,mazeLoopChance,maxTunnelLength)
-	--returns an array of all block positions in a generated maze as vector3
+function Maze.generateMaze(
+	mazeSize:Vector3,
+	tunnelSize:IntValue,
+	mazeLoopChance:IntValue,
+	maxTunnelLength:IntValue
+):any
+	local blockGridPositions = createBlockGridPositions(mazeSize, tunnelSize,ProgressBarSetter)
+	
+	local blockPositions = Chunk.generateChunks(mazeSize,tunnelSize,blockGridPositions)
+	
+	local loadingMessage = "Generating Maze..."
+	local incrementAmount = 1 / (mazeSize.X * mazeSize.Y * mazeSize.Z)
+	ProgressBarSetter.SetProgressBar(loadingMessage,incrementAmount)
+	
+	local takenPositions = Chunk.generateChunks(mazeSize,0,{})
 	local mazeHeadPosition = Vector3.new(0, 0, 0)
-	local takenPositions = {{mazeHeadPosition,mazeHeadPosition}}
-	local blockPositions = createBlockGridPositions(mazeSize, tunnelSize)
+	table.insert(takenPositions[1][1][1],{mazeHeadPosition,mazeHeadPosition})
+	ProgressBarSetter.IncrementProgressBar()
 	
 	while true do
+		wait(0.001)
 		local possiblePaths = findPossibleVector3Paths(mazeHeadPosition,takenPositions,mazeSize,maxTunnelLength)
 		local paths = determinePaths(possiblePaths)
 		local pathsTaken = {}
@@ -347,13 +379,18 @@ function Maze.generateMaze(mazeSize,tunnelSize,mazeLoopChance,maxTunnelLength)
 			if not checkFor0Vector3(path) then
 				local newPathPositions = createPath(path,mazeHeadPosition)
 				for _,newPathPosition in newPathPositions do
-					table.insert(takenPositions,newPathPosition)
+					ProgressBarSetter.IncrementProgressBar()
+					local x,y,z,i = Chunk.findTargetPosition(newPathPosition[1],takenPositions)
+					table.insert(takenPositions[x][y][z],newPathPosition)
 				end
 				table.insert(pathsTaken,counter)
 				
 				local newBlockPositions = createBlockPositionsAlongPath(path,mazeHeadPosition,tunnelSize)
 				for _,newBlockPosition in newBlockPositions do
-					table.insert(blockPositions,newBlockPosition)
+					local x,y,z,i = Chunk.findTargetPosition(newBlockPosition,blockPositions)
+					if i == nil then
+						table.insert(blockPositions[x][y][z],{newBlockPosition})
+					end
 				end
 			end
 			counter += 1
@@ -361,12 +398,17 @@ function Maze.generateMaze(mazeSize,tunnelSize,mazeLoopChance,maxTunnelLength)
 		
 		local newBlockPositions = createBlockPositionsAtMazeHeadPosition(pathsTaken,mazeHeadPosition,tunnelSize,takenPositions,mazeLoopChance)
 		for _,newBlockPosition in newBlockPositions do
-			table.insert(blockPositions,newBlockPosition)
+			local x,y,z,i = Chunk.findTargetPosition(newBlockPosition,blockPositions)
+			if i == nil then
+				table.insert(blockPositions[x][y][z],{newBlockPosition})
+			end
 		end
 		
-		local index = findMazePosition(takenPositions,mazeHeadPosition)
-		table.remove(takenPositions,index)
-		table.insert(takenPositions,{mazeHeadPosition,Vector3.new(0,0,0)})
+		local x,y,z,i = Chunk.findTargetPosition(mazeHeadPosition,takenPositions)
+		if not (i == nil) then
+			table.remove(takenPositions[x][y][z][i],2)
+			table.insert(takenPositions[x][y][z][i],Vector3.new(0,0,0))
+		end
 
 		mazeHeadPosition = findNewMazeHeadPosition(takenPositions)
 		if mazeHeadPosition == nil then
