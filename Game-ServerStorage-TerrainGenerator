@@ -1,0 +1,256 @@
+local Terrain = {}
+
+local ServerStorage = game:GetService("ServerStorage")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Chunk = require(ServerStorage:WaitForChild("ChunkGenerator"))
+
+local ProgressBarSetter = require(ReplicatedStorage:WaitForChild("ProgressBarSetter"))
+
+local unitVectors = {Vector3.new(1, 0, 0),Vector3.new(0, 1, 0),Vector3.new(0, 0, 1),
+	Vector3.new(-1, 0, 0),Vector3.new(0, -1, 0),Vector3.new(0, 0, -1)}
+
+local function addValueToPosition(targetPosition:Vector3,blockPositions:any,value:number):any
+	local x,y,z,i = Chunk.findTargetPosition(targetPosition,blockPositions)
+	local chunk = blockPositions[x][y][z]
+	if i == nil then
+		table.insert(chunk,{targetPosition,value})
+	elseif #chunk[i] == 1 then
+		table.insert(chunk[i],value)
+	else
+		chunk[i][2] += value
+	end
+	return blockPositions
+end
+
+local function generateTerrainPositions(blockPositions:any):any
+	local loadingMessage = "Generating Terrain Positions..."
+	local incrementAmount = 1 / (#blockPositions)
+	ProgressBarSetter.SetProgressBar(loadingMessage,incrementAmount)
+	
+	local takenPositions = Chunk.cloneBlockPositions(blockPositions)
+	local counter = 1
+	for _,yzPlane in pairs(blockPositions) do
+		for _,zAxis in pairs(yzPlane) do
+			for _,chunk in pairs(zAxis) do
+				for _,blockPosition in pairs(chunk) do
+					for _,unitVectorA in pairs(unitVectors) do
+						local targetPositionA = blockPosition[1] + unitVectorA
+						if Chunk.checkIfInsideMaze(targetPositionA,blockPositions) then
+							takenPositions = addValueToPosition(targetPositionA,takenPositions,0.5)
+						end
+						for _,unitVectorB in pairs(unitVectors) do
+							local targetPositionB = blockPosition[1] + unitVectorA + unitVectorB
+							if Chunk.checkIfInsideMaze(targetPositionB,blockPositions) then
+								takenPositions = addValueToPosition(targetPositionB,takenPositions,0.1)
+							end
+						end
+					end
+				end
+			end
+			if counter > 10 then
+				wait(0.001)
+				counter = 1
+			end
+			counter += 1
+		end
+		ProgressBarSetter.IncrementProgressBar()
+	end
+	return takenPositions
+end
+
+local function removePositionsWithoutValue(positionsAndValues:any):any
+	local loadingMessage = "Removing Duplicate Positions..."
+	local incrementAmount = 1 / (#positionsAndValues)
+	ProgressBarSetter.SetProgressBar(loadingMessage,incrementAmount)
+	
+	for _,yzPlane in pairs(positionsAndValues) do
+		for _,zAxis in pairs(yzPlane) do
+			for _,chunk in pairs(zAxis) do
+				for i = #chunk, 1, -1 do
+					if chunk[i][2] == nil then
+						table.remove(chunk,i)
+					end
+				end
+			end
+		end
+		ProgressBarSetter.IncrementProgressBar()
+		wait(0.001)
+	end
+	return positionsAndValues
+end
+
+local function addPerlinNoiseToTerrainPositions(positionsAndValues:any,mazeSeed:IntValue):any
+	local loadingMessage = "Adding Perlin Noise..."
+	local incrementAmount = 1 / (#positionsAndValues)
+	ProgressBarSetter.SetProgressBar(loadingMessage,incrementAmount)
+	
+	for _,yzPlane in pairs(positionsAndValues) do
+		for _,zAxis in pairs(yzPlane) do
+			for _,chunk in pairs(zAxis) do
+				for _,positionAndValue in pairs(chunk) do
+					local x = positionAndValue[1].X
+					local y = positionAndValue[1].Y
+					local z = positionAndValue[1].Z
+					local perlinNoise = math.noise((x + mazeSeed + 0.1)/8,(y + mazeSeed + 0.1)/8,(z + mazeSeed + 0.1)/8)
+					positionAndValue[2] += perlinNoise + 0.25
+				end
+			end
+		end
+		ProgressBarSetter.IncrementProgressBar()
+		wait(0.001)
+	end
+	return positionsAndValues
+end
+
+local function generateTerrainPositionValues(blockPositions:any,mazeSeed:IntValue):any
+	local positionsAndValues = generateTerrainPositions(blockPositions)
+	positionsAndValues = removePositionsWithoutValue(positionsAndValues)
+	return addPerlinNoiseToTerrainPositions(positionsAndValues,mazeSeed)
+end
+
+local function determineBlockPositionType(positionsAndValues:any, valueRange:{number}):{Vector3}
+	local loadingMessage = "determining block positions..."
+	local incrementAmount = 1 / (#positionsAndValues)
+	ProgressBarSetter.SetProgressBar(loadingMessage,incrementAmount)
+	
+	local blockPositions = {}
+	for _,yzPlane in pairs(positionsAndValues) do
+		for _,zAxis in pairs(yzPlane) do
+			for _,chunk in pairs(zAxis) do
+				for _,positionAndValue in pairs(chunk) do
+					if positionAndValue[2] > valueRange[1] and positionAndValue[2] <= valueRange[2] then
+						table.insert(blockPositions,positionAndValue[1])
+					end
+				end
+			end
+		end
+		ProgressBarSetter.IncrementProgressBar()
+		wait(0.001)
+	end
+	return blockPositions
+end
+
+local function placeBlocksInWorld(blockPositions:{Vector3},BlocksFolder:Folder,blockName:string):{Part}
+	local loadingMessage = "placing " .. blockName .. " in world..."
+	local incrementAmount = 1 / (#blockPositions/1000)
+	ProgressBarSetter.SetProgressBar(loadingMessage,incrementAmount)
+	
+	local block = BlocksFolder:WaitForChild(blockName)
+	local blocks = {}
+	local counter = 1
+	for _, blockPosition in ipairs(blockPositions) do
+		local clonedBlock = block:Clone()
+		if clonedBlock:IsA("BasePart") then
+			clonedBlock.Position = blockPosition * 4
+		else
+			clonedBlock:PivotTo(CFrame.new(blockPosition.X * 4, blockPosition.Y * 4, blockPosition.Z * 4))
+		end
+		clonedBlock.Parent = workspace:WaitForChild("Block Terrain")
+		table.insert(blocks,clonedBlock)
+		
+		counter += 1
+		if counter > 1000 then
+			ProgressBarSetter.IncrementProgressBar()
+			wait(0.001)
+			counter = 1
+		end
+	end
+	return blocks
+end
+
+local function changeStoneToDirt(blockPositions:{Vector3},mazeSeed:IntValue,blockName:string):{Vector3}
+	local loadingMessage = "getting " .. blockName .. " positions..."
+	local incrementAmount = 1 / (#blockPositions/5000)
+	ProgressBarSetter.SetProgressBar(loadingMessage,incrementAmount)
+	
+	local newBlockPositions = {}
+	local counter = 1
+	for _,blockPosition in pairs(blockPositions) do
+		local x = blockPosition.X
+		local y = blockPosition.Y
+		local z = blockPosition.Z
+		local perlinNoise = math.noise((x + mazeSeed + 0.2)/16,(y + mazeSeed + 0.2)/16,(z + mazeSeed + 0.2)/16)
+		if perlinNoise > 0 then
+			if blockName == "Grey Stone" then
+				table.insert(newBlockPositions,blockPosition)
+			end	
+		elseif blockName == "Brown Dirt" then
+			table.insert(newBlockPositions,blockPosition)
+		end
+		
+		counter += 1
+		if counter > 5000 then
+			ProgressBarSetter.IncrementProgressBar()
+			wait(0.001)
+			counter = 1
+		end
+	end
+	return newBlockPositions
+end
+
+local function findGrassAboveDirt(
+	initialGreenGrassPositions:{Vector3},
+	positionsAndValues:any,
+	valueRange:{number},
+	mazeSeed:IntValue
+):{Vector3}
+	local loadingMessage = "determining grass positions..."
+	local incrementAmount = 1 / (#initialGreenGrassPositions/5000)
+	ProgressBarSetter.SetProgressBar(loadingMessage,incrementAmount)
+	
+	local blockPositions = {}
+	local counter = 1
+	for _,position in pairs(initialGreenGrassPositions) do
+		local targetPosition = position + Vector3.new(0,-1,0)
+		if Chunk.checkIfInsideMaze(targetPosition,positionsAndValues) then
+			local x,y,z,i = Chunk.findTargetPosition(targetPosition,positionsAndValues)
+			if not (i == nil) then
+				local positionAndValue = positionsAndValues[x][y][z][i]
+				local x = positionAndValue[1].X
+				local y = positionAndValue[1].Y
+				local z = positionAndValue[1].Z
+				local perlinNoise = math.noise((x + mazeSeed + 0.2)/16,(y + mazeSeed + 0.2)/16,(z + mazeSeed + 0.2)/16)
+				if perlinNoise < 0 and positionAndValue[2] > valueRange[1] and positionAndValue[2] <= valueRange[2] then
+					table.insert(blockPositions,position)
+				end
+			end
+		end
+		
+		counter += 1
+		if counter > 5000 then
+			ProgressBarSetter.IncrementProgressBar()
+			wait(0.001)
+			counter = 1
+		end
+	end
+	return blockPositions
+end
+
+function Terrain.generateTerrain(blockPositions:any,BlocksFolder:Folder,mazeSeed:IntValue)
+	local positionsAndValues = generateTerrainPositionValues(blockPositions,mazeSeed)
+	local blackRockValueRange = {3,10}
+	local greyStoneValueRange = {2,3}
+	local brownDirtValueRange = {0.5,2}
+	local greenGrassValueRange = {0,0.5}
+	
+	local blackRockPositions = determineBlockPositionType(positionsAndValues, blackRockValueRange)
+	local BlackRocks = placeBlocksInWorld(blackRockPositions,BlocksFolder,"Black Rock")
+	
+	local initialGreyStonePositions = determineBlockPositionType(positionsAndValues, greyStoneValueRange)
+	local addedGreyStonePositions = determineBlockPositionType(positionsAndValues, brownDirtValueRange)
+	local greyStonePositions = changeStoneToDirt(addedGreyStonePositions,mazeSeed,"Grey Stone")
+	for _,initialGreyStonePosition in pairs(initialGreyStonePositions) do
+		table.insert(greyStonePositions,initialGreyStonePosition)
+	end
+	local GreyStone = placeBlocksInWorld(greyStonePositions,BlocksFolder,"Grey Stone")
+
+	local brownDirtPositions = changeStoneToDirt(addedGreyStonePositions,mazeSeed,"Brown Dirt")
+	local BrownDirt = placeBlocksInWorld(brownDirtPositions,BlocksFolder,"Brown Dirt")
+	
+	local initialGreenGrassPositions = determineBlockPositionType(positionsAndValues, greenGrassValueRange)
+	local greenGrassPositions = findGrassAboveDirt(initialGreenGrassPositions,positionsAndValues, brownDirtValueRange,mazeSeed)
+	local GreenGrass = placeBlocksInWorld(greenGrassPositions,BlocksFolder,"Green Grass Model")
+end
+
+return Terrain
