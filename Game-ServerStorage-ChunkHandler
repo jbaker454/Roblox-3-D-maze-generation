@@ -1,0 +1,81 @@
+local Chunk = {}
+
+local chunkSize = 3
+
+local function compareVector3(vector3A:Vector3,vector3B:Vector3):boolean
+	if vector3A.X == vector3B.X and vector3A.Y == vector3B.Y and vector3A.Z == vector3B.Z then
+		return true
+	end
+	return false
+end
+
+local function inilizeChunks(chunkCount:Vector3):any
+	local chunks = {}
+	for x = 1,chunkCount.X do
+		chunks[x] = {}
+		for y = 1,chunkCount.Y do
+			chunks[x][y] = {}
+			for z = 1,chunkCount.Z do
+				chunks[x][y][z] = {}
+			end
+		end
+	end
+	return chunks
+end
+
+local function getChunkIndex(position:Vector3):(IntValue,IntValue,IntValue)
+	local x = math.floor(position.x / chunkSize) + 1
+	local y = math.floor(position.y / chunkSize) + 1
+	local z = math.floor(position.z / chunkSize) + 1
+	return x, y, z
+end
+
+function Chunk.generateChunks(mazeSize:Vector3,tunnelSize:IntValue,blockPositions:{Vector3}):any
+	local trueMazeSize = Vector3.new(mazeSize.X * (tunnelSize + 1) + 1,mazeSize.Y * (tunnelSize + 1) + 1,mazeSize.Z * (tunnelSize + 1) + 1)
+	local chunkCount = Vector3.new(math.ceil(trueMazeSize.X/chunkSize),math.ceil(trueMazeSize.Y/chunkSize),math.ceil(trueMazeSize.Z/chunkSize))
+	local chunks = inilizeChunks(chunkCount)
+	
+	for _,blockPosition in pairs(blockPositions) do
+		local x, y, z = getChunkIndex(blockPosition)
+		table.insert(chunks[x][y][z], {blockPosition})
+	end
+	return chunks
+end
+
+local function findChunkMazeSize(blockPositions:any):Vector3
+	return Vector3.new(chunkSize * #blockPositions - 1,chunkSize * #blockPositions[1] - 1,chunkSize * #blockPositions[1][1] - 1)
+end
+
+function Chunk.checkIfInsideMaze(position:Vector3,blockPositions:any):boolean
+	local chunkMazeSize = findChunkMazeSize(blockPositions)
+	if chunkMazeSize.X < position.X or chunkMazeSize.Y < position.Y or chunkMazeSize.Z < position.Z or
+		0 > position.X or 0 > position.Y or 0 > position.Z then
+		return false
+	else
+		return true
+	end
+end
+
+function Chunk.findTargetPosition(targetPosition:Vector3,blockPositions:any):(number,number,number,number?)
+	local x,y,z = getChunkIndex(targetPosition)
+	local chunk = blockPositions[x][y][z]
+	for i = 1, #chunk do
+		if compareVector3(chunk[i][1],targetPosition) then
+			return x,y,z,i
+		end
+	end
+	return x,y,z,nil
+end
+
+function Chunk.cloneBlockPositions(table:{any}):{any}
+	local copy = {}
+	for k, v in pairs(table) do
+		if type(v) == "table" then
+			v = Chunk.cloneBlockPositions(v)
+		end
+		copy[k] = v
+	end
+	return copy
+end
+
+return Chunk
