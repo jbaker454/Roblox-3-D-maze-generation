@@ -1,0 +1,147 @@
+local Structure = {}
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ProgressBarSetter = require(ReplicatedStorage:WaitForChild("ProgressBarSetter"))
+
+local function modifyAxis(axis:number,tunnelSize:IntValue):number
+	return math.floor((axis * (tunnelSize + 1)) - (tunnelSize/2))
+end
+
+local function generateCenterPositions(mazeSize:Vector3,tunnelSize:IntValue):{Vector3}
+	local centerPositions = {}
+	for x = 1, mazeSize.X do
+		for y = 1, mazeSize.Y do
+			for z = 1, mazeSize.Z do
+				local centerPosition = Vector3.new(modifyAxis(x,tunnelSize),modifyAxis(y,tunnelSize),modifyAxis(z,tunnelSize))
+				table.insert(centerPositions,centerPosition)
+			end
+		end
+	end
+	return centerPositions
+end
+
+local function placeBlocksInWorld(blockPositions:{Vector3},BlocksFolder:Folder,blockName:string):{Part}
+	local block = BlocksFolder:WaitForChild(blockName)
+	local blocks = {}
+	for _, blockPosition in ipairs(blockPositions) do
+		local clonedBlock = block:Clone()
+		if clonedBlock:IsA("BasePart") then
+			clonedBlock.Position = blockPosition * 4
+		else
+			clonedBlock:PivotTo(CFrame.new(blockPosition.X * 4, blockPosition.Y * 4, blockPosition.Z * 4))
+		end
+		clonedBlock.Parent = workspace:WaitForChild("Structures")
+		table.insert(blocks,clonedBlock)
+	end
+	return blocks
+end
+
+local function pickRandomPositions(positions:{Vector3},amount:IntValue)
+	local determinedPositions = {}
+	local positionsLeft = table.maxn(positions)
+	local amountLeft = amount
+	for _,position in pairs(positions) do
+		if math.random(1,positionsLeft) <= (amountLeft) then
+			table.insert(determinedPositions,position)
+			amountLeft -= 1
+		end
+		positionsLeft -= 1
+	end
+	return determinedPositions
+end
+
+local function checkBlockFound(BlockCheck:Part):any?
+	local blocks = workspace:GetPartBoundsInBox(BlockCheck.CFrame,BlockCheck.Size)
+	if not (table.maxn(blocks) == 1) then
+		if blocks[2].Parent.Parent.Name == "Workspace" then
+			return blocks[2]
+		else
+			return blocks[2].Parent
+		end
+	else
+		return nil
+	end
+end
+
+local function placeBlockPositionsOnGround(position:Vector3,BlocksFolder:Folder,direction:IntValue,dislocationAmount:IntValue):Vector3
+	local currentPosition = position
+	for i = 1,dislocationAmount do
+		local nextPosition = currentPosition - Vector3.new(math.random(-1,1),direction,math.random(-1,1))
+		local BlockCheck = placeBlocksInWorld({nextPosition},BlocksFolder,"Block Check")
+		local BlockFound = checkBlockFound(BlockCheck[1])
+		if not (BlockFound == nil) then
+			BlockCheck[1]:Destroy()
+			break
+		end
+		BlockCheck[1]:Destroy()
+		currentPosition = nextPosition
+	end
+	position = currentPosition + Vector3.new(0,-1,0)
+	for i = 1,dislocationAmount do
+		local nextPosition = currentPosition + Vector3.new(0,direction,0)
+		local BlockCheck = placeBlocksInWorld({nextPosition},BlocksFolder,"Block Check")
+		local BlockFound = checkBlockFound(BlockCheck[1])
+		if not (BlockFound == nil) then
+			if BlockFound:IsA("BasePart") then
+				position = currentPosition
+			else
+				position = nextPosition
+				BlockFound:Destroy()
+			end
+			BlockCheck[1]:Destroy()
+			break
+		end
+		BlockCheck[1]:Destroy()
+		currentPosition = nextPosition
+	end
+	return position
+end
+
+function Structure.GenerateSpawnBlocks(mazeSize:Vector3,BlocksFolder:Folder,tunnelSize:IntValue)
+	local centerPositions = generateCenterPositions(mazeSize,tunnelSize)
+	local amount = math.floor(table.maxn(centerPositions) ^ (1/3))
+	local blockPositions = pickRandomPositions(centerPositions,amount)
+	local newBlockPositions = {}
+	for _,blockPosition in pairs(blockPositions) do
+		local newPosition = placeBlockPositionsOnGround(blockPosition,BlocksFolder,-1,33)
+		table.insert(newBlockPositions,newPosition)
+	end
+	local SpawnBlocks = placeBlocksInWorld(newBlockPositions,BlocksFolder,"Spawn Block Model")
+end
+
+function Structure.GenerateEasterEgg(mazeSize:Vector3,BlocksFolder:Folder,tunnelSize:IntValue)
+	local centerPositions = generateCenterPositions(mazeSize,tunnelSize)
+	local amount = 1
+	local blockPositions = pickRandomPositions(centerPositions,amount)
+	local newBlockPositions = {}
+	for _,blockPosition in pairs(blockPositions) do
+		local newPosition = placeBlockPositionsOnGround(blockPosition,BlocksFolder,-1,100)
+		table.insert(newBlockPositions,newPosition)
+	end
+	placeBlocksInWorld(newBlockPositions,BlocksFolder,"Easter Egg Model")
+end
+
+function Structure.generateLightGrid(mazeSize:Vector3,BlocksFolder:Folder,tunnelSize:IntValue)
+	local blockPositions = generateCenterPositions(mazeSize,tunnelSize)
+	
+	local loadingMessage = "Finding Light Locations..."
+	local incrementAmount = 1 / (#blockPositions/100)
+	ProgressBarSetter.SetProgressBar(loadingMessage,incrementAmount)
+	
+	local newBlockPositions = {}
+	local i = 1
+	for _,blockPosition in pairs(blockPositions) do
+		local newPosition = placeBlockPositionsOnGround(blockPosition,BlocksFolder,1,10)
+		table.insert(newBlockPositions,newPosition)
+		
+		i += 1
+		if i > 100 then
+			ProgressBarSetter.IncrementProgressBar()
+			wait(0.001)
+			i = 1
+		end
+	end
+	placeBlocksInWorld(newBlockPositions,BlocksFolder,"Light Block")
+end
+
+return Structure
